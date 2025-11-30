@@ -1,0 +1,42 @@
+Set Starting Points for Game Slot GOW,,"Alternative Slot format ""Actual Data"" not always in correct order "
+Can only use With Quick mode Save Slots will be in order as seen on Screen ,,"With the following Addresses on 0x00 = Epoch time in hex that you can use to tell what time the save was it should match the time on the save you will need to Reverse it from whats shown in hex, u can type it into the link below "
+Slot 1,,https://www.epochconverter.com/hex
+90000000 00000200,,95000000 00001040
+Slot 2,,95000000 0019A908
+90000000 00000208,,95000000 003341D0
+Slot 3,,95000000 004CDA98
+90000000 00000210,,95000000 00667360
+Slot 4,,95000000 00800C28
+90000000 00000218,,95000000 0099A4F0
+Slot 5,,95000000 00B33DB8
+90000000 00000220,,95000000 00CCD680
+Slot 6,,95000000 00E66F48
+90000000 00000228,,95000000 01000810
+Slot 7,,95000000 0119A0D8
+90000000 00000230,,95000000 013339A0
+Slot 8,,95000000 014CD268
+90000000 00000238,,95000000 01666B30
+Slot 9,,95000000 018003F8
+90000000 00000240,,95000000 01999CC0
+Slot 10,,95000000 01B33588
+90000000 00000248,,95000000 01CCCE50
+Slot 11,,95000000 01E66718
+90000000 00000250,,
+Slot 12,,
+90000000 00000258,,
+Slot 13,,
+90000000 00000260,,
+Slot 14,,
+90000000 00000268,,
+Slot 15,,
+90000000 00000270,,
+Slot 16,,
+90000000 00000278,,
+Slot 17,,
+90000000 00000280,,
+Slot 18,,
+90000000 00000288,,
+Slot 19,,
+90000000 00000290,,
+Slot 20,,
+90000000 00000298,,

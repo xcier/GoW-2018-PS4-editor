@@ -1,0 +1,178 @@
+{
+  "sections": [
+    {
+      "name": "Change Difficulty",
+      "author": null,
+      "lines": [
+        {
+          "code": "90000000 XXXXXXXX",
+          "note": "Set this line to the Save Slot Starting Point you want to use"
+        },
+        {
+          "code": "88010008 5F2243C6",
+          "note": "YY=Difficulty. 00=Story,01=Balanced, 02=Challenge, 03=God of War"
+        },
+        {
+          "code": "95480000 00000000",
+          "note": null
+        },
+        {
+          "code": "93000000 00000002",
+          "note": null
+        },
+        {
+          "code": "08000000 000000YY",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Find Equipment  (ID) ",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "90000000 XXXXXXXX",
+          "note": "Set this line to the Save Slot Starting Point you want to use"
+        },
+        {
+          "code": "CF35641B 00000000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Defense - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 0B72D37F",
+          "note": null
+        },
+        {
+          "code": "90000000 00000200",
+          "note": null
+        },
+        {
+          "code": "6DC3F0F0 00000000",
+          "note": null
+        },
+        {
+          "code": "88010008 5DB74F7B",
+          "note": null
+        },
+        {
+          "code": "CF35641B 00000000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Vitality - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 CBC51FB7",
+          "note": null
+        },
+        {
+          "code": "6DC3F0F0 00000000",
+          "note": null
+        },
+        {
+          "code": "7C16F8F3 00000000",
+          "note": null
+        },
+        {
+          "code": "28000008 42C60000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Luck - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 93E62C7A",
+          "note": null
+        },
+        {
+          "code": "90000000 00000200",
+          "note": null
+        },
+        {
+          "code": "854C0000 00000000",
+          "note": null
+        },
+        {
+          "code": "88010008 5DB74F7B",
+          "note": null
+        },
+        {
+          "code": "CF35641B 00000000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Runic - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 48B6FD1A",
+          "note": null
+        },
+        {
+          "code": "1CCEAB3A 00000000",
+          "note": null
+        },
+        {
+          "code": "C0CB4E01 00000000",
+          "note": null
+        },
+        {
+          "code": "28000008 42C60000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "CoolDown - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 57B8D16A",
+          "note": null
+        },
+        {
+          "code": "F17D1E01 00000000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Strength - (Pick only the one/s your Armor has)",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "88010008 7A00D0F0",
+          "note": null
+        },
+        {
+          "code": "1CCEAB3A 00000000",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "Set to 99",
+      "author": "Skiller#4741",
+      "lines": [
+        {
+          "code": "28000008 42C60000",
+          "note": null
+        }
+      ]
+    }
+  ]
+}

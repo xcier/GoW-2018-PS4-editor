@@ -1,0 +1,39 @@
+Jimmy the Burger Wizard,Change Difficulty,,,
+,90000000 XXXXXXXX,,Set this line to the Save Slot Starting Point you want to use,
+,88010008 5F2243C6,,"YY=Difficulty. 00=Story,01=Balanced, 02=Challenge, 03=God of War",
+,95480000 00000000,,,
+,93000000 00000002,,,
+,08000000 000000YY,,,
+,,,,
+,,,,
+Skiller#4741,Find Equipment  (ID) ,,V = Equipment Rune Slot 1 to 3 ( Currently set to Valkyrie chest),
+,90000000 XXXXXXXX,,Set this line to the Save Slot Starting Point you want to use,
+,880V0008 5DB74F7B,,5DB74F7B CF35641B Change this to one of the Equipment you want to change stats in from Item IDs,
+,CF35641B 00000000,,,
+,,,,
+Skiller#4741,Defense - (Pick only the one/s your Armor has),,You need to Stack them with the Find Equipment part so if you want to Example,Save slot 1 -  Set Valkyrie chest Defense to 99
+,88010008 0B72D37F,,,90000000 00000200
+,6DC3F0F0 00000000,,,88010008 5DB74F7B
+,,,,CF35641B 00000000
+Skiller#4741,Vitality - (Pick only the one/s your Armor has),,,88010008 0B72D37F
+,88010008 CBC51FB7,,,6DC3F0F0 00000000
+,7C16F8F3 00000000,,,28000008 42C60000
+,,,,
+Skiller#4741,Luck - (Pick only the one/s your Armor has),,,Save slot 1 -  Set Valkyrie chest Strength to 99
+,88010008 93E62C7A,,,90000000 00000200
+,854C0000 00000000,,,88010008 5DB74F7B
+,,,,CF35641B 00000000
+Skiller#4741,Runic - (Pick only the one/s your Armor has),,,88010008 7A00D0F0
+,88010008 48B6FD1A,,,1CCEAB3A 00000000
+,C0CB4E01 00000000,,,28000008 42C60000
+,,,,
+Skiller#4741,CoolDown - (Pick only the one/s your Armor has),,,
+,88010008 57B8D16A,,,
+,F17D1E01 00000000,,,
+,,,,
+Skiller#4741,Strength - (Pick only the one/s your Armor has),,,
+,88010008 7A00D0F0,,,
+,1CCEAB3A 00000000,,,
+,,,,
+Skiller#4741,Set to 99,,,
+,28000008 42C60000,,,

@@ -1,0 +1,104 @@
+{
+  "slots": [
+    {
+      "slot": 1,
+      "quick_pointer": "90000000 00000200",
+      "alt_pointer": "95000000 00001040"
+    },
+    {
+      "slot": 2,
+      "quick_pointer": "90000000 00000208",
+      "alt_pointer": "95000000 0019A908"
+    },
+    {
+      "slot": 3,
+      "quick_pointer": "90000000 00000210",
+      "alt_pointer": "95000000 004CDA98"
+    },
+    {
+      "slot": 4,
+      "quick_pointer": "90000000 00000218",
+      "alt_pointer": "95000000 00800C28"
+    },
+    {
+      "slot": 5,
+      "quick_pointer": "90000000 00000220",
+      "alt_pointer": "95000000 00B33DB8"
+    },
+    {
+      "slot": 6,
+      "quick_pointer": "90000000 00000228",
+      "alt_pointer": "95000000 00E66F48"
+    },
+    {
+      "slot": 7,
+      "quick_pointer": "90000000 00000230",
+      "alt_pointer": "95000000 0119A0D8"
+    },
+    {
+      "slot": 8,
+      "quick_pointer": "90000000 00000238",
+      "alt_pointer": "95000000 014CD268"
+    },
+    {
+      "slot": 9,
+      "quick_pointer": "90000000 00000240",
+      "alt_pointer": "95000000 018003F8"
+    },
+    {
+      "slot": 10,
+      "quick_pointer": "90000000 00000248",
+      "alt_pointer": "95000000 01B33588"
+    },
+    {
+      "slot": 11,
+      "quick_pointer": "90000000 00000250",
+      "alt_pointer": "95000000 01E66718"
+    },
+    {
+      "slot": 12,
+      "quick_pointer": "90000000 00000258",
+      "alt_pointer": null
+    },
+    {
+      "slot": 13,
+      "quick_pointer": "90000000 00000260",
+      "alt_pointer": null
+    },
+    {
+      "slot": 14,
+      "quick_pointer": "90000000 00000268",
+      "alt_pointer": null
+    },
+    {
+      "slot": 15,
+      "quick_pointer": "90000000 00000270",
+      "alt_pointer": null
+    },
+    {
+      "slot": 16,
+      "quick_pointer": "90000000 00000278",
+      "alt_pointer": null
+    },
+    {
+      "slot": 17,
+      "quick_pointer": "90000000 00000280",
+      "alt_pointer": null
+    },
+    {
+      "slot": 18,
+      "quick_pointer": "90000000 00000288",
+      "alt_pointer": null
+    },
+    {
+      "slot": 19,
+      "quick_pointer": "90000000 00000290",
+      "alt_pointer": null
+    },
+    {
+      "slot": 20,
+      "quick_pointer": "90000000 00000298",
+      "alt_pointer": null
+    }
+  ]
+}
