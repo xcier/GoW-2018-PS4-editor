@@ -16,7 +16,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QHeaderView,
     QFrame,
-    QAbstractItemView,   # <-- NEW
+    QAbstractItemView,
+    QCheckBox,
 )
 
 from app.core.file_context import FileContext
@@ -29,18 +30,17 @@ class InventoryTab(QWidget):
 
     Left side:
         - All known items from gow2018_items.json (database only)
-        - Filter by Type + search box
+        - Filter by Type + search box + "Hide Unknown items" checkbox
 
     Right side:
-        - Items actually present in the currently loaded save
-        - Populated by scanning the inventory table in memory.dat
+        - Items actually present in the currently loaded save (active slot)
+        - Same "Hide Unknown items" checkbox hides unknown entries here too
+          (but does not delete them from the save).
 
     Editing:
-        - You can:
-            * Add/Remove/Clear via the buttons
-            * Directly edit the Qty column (double-click)
-        - Call `apply_to_save()` to write the current in-memory model
-          back into the underlying save bytes.
+        - Add/Remove/Clear via buttons
+        - Directly edit Qty column (double-click)
+        - MainWindow calls apply_to_save() before saving to disk.
     """
 
     INVENTORY_TABLE_REL_OFFSET = 0x001041D
@@ -55,19 +55,19 @@ class InventoryTab(QWidget):
         self._all_items: List[Dict] = []
         self._filtered_items: List[Dict] = []
 
-        # each dict: {"id": str, "name": str, "type": str, "qty": int}
+        # items in current slot: {id, name, type, qty}
         self._items_in_save: List[Dict] = []
-
-        # item_id -> list of entry positions in memory.dat
         self._item_write_info: Dict[str, List[int]] = {}
         self._free_entry_positions: List[int] = []
 
-        # guard flag to avoid recursion when updating table programmatically
         self._updating_save_table: bool = False
+        self._hide_unknowns: bool = False
 
         self._build_ui()
         self._load_items_db()
         self._apply_filters()
+
+        self.setDisabled(True)
 
     # ------------------------------------------------------------------
     # UI
@@ -78,7 +78,7 @@ class InventoryTab(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        # Filters
+        # Filters row
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
 
@@ -96,13 +96,18 @@ class InventoryTab(QWidget):
         self.search_edit.textChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self.search_edit, 1)
 
+        # NEW: Hide-unknowns checkbox
+        self.hide_unknowns_chk = QCheckBox("Hide Unknown items", self)
+        self.hide_unknowns_chk.toggled.connect(self._on_hide_unknowns_toggled)
+        filter_row.addWidget(self.hide_unknowns_chk)
+
         layout.addLayout(filter_row)
 
         # Main area
         main_row = QHBoxLayout()
         main_row.setSpacing(8)
 
-        # Left: database
+        # Left: database ------------------------------------------------
         left_col = QVBoxLayout()
         left_col.setSpacing(4)
         left_col.addWidget(QLabel("Available Items (database)", self))
@@ -110,15 +115,19 @@ class InventoryTab(QWidget):
         self.table_available = QTableWidget(self)
         self.table_available.setColumnCount(4)
         self.table_available.setHorizontalHeaderLabels(["#", "Name", "Type", "ID"])
-        self.table_available.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table_available.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table_available.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table_available.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table_available.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.table_available.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_available.verticalHeader().setVisible(False)
         left_col.addWidget(self.table_available, 1)
 
         main_row.addLayout(left_col, 2)
 
-        # Middle: buttons
+        # Middle: buttons ----------------------------------------------
         btn_col = QVBoxLayout()
         btn_col.addStretch(1)
 
@@ -137,7 +146,7 @@ class InventoryTab(QWidget):
         btn_col.addStretch(2)
         main_row.addLayout(btn_col)
 
-        # Right: items in save
+        # Right: items in save -----------------------------------------
         right_col = QVBoxLayout()
         right_col.setSpacing(4)
         right_col.addWidget(QLabel("Items in Save", self))
@@ -145,10 +154,13 @@ class InventoryTab(QWidget):
         self.table_save = QTableWidget(self)
         self.table_save.setColumnCount(4)
         self.table_save.setHorizontalHeaderLabels(["Name", "Type", "ID", "Qty"])
-        self.table_save.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table_save.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table_save.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table_save.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
 
-        # Make Qty editable (but only that column; others get non-editable flags)
         self.table_save.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.SelectedClicked
@@ -163,10 +175,11 @@ class InventoryTab(QWidget):
 
         layout.addLayout(main_row, 1)
 
+        # Footer note
         note = QLabel(
-            "Open a .dat save to view and edit items in the current slot.\n"
+            "Open a decrypted memory.dat to view and edit items in the current slot.\n"
             "You can edit quantities directly in the Qty column.\n"
-            "Remember: call 'apply_to_save()' before saving to disk.",
+            "Remember: File → Save / Save As will commit changes to disk.",
             self,
         )
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -189,6 +202,30 @@ class InventoryTab(QWidget):
         hr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_unknown_row(row: Dict) -> bool:
+        """
+        Decide whether a DB/save row counts as 'unknown' for hiding.
+        We treat things like:
+          - type: 'Unknown' or '?' or empty
+          - name: '(Unknown)' or '' or startswith 'unknown'
+        as unknown.
+        """
+        name = (row.get("name") or "").strip().lower()
+        type_ = (row.get("type") or "").strip().lower()
+
+        if type_ in ("unknown", "?", "") and (
+            not name
+            or name.startswith("unknown")
+            or name.startswith("(unknown")
+        ):
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Items DB + filters
     # ------------------------------------------------------------------
 
@@ -199,9 +236,14 @@ class InventoryTab(QWidget):
             print(f"[InventoryTab] Failed to load items DB: {exc}")
             self._all_items = []
 
-        try:
-            types = gow2018_data.get_all_types()
-        except Exception:
+        # type list
+        types: List[str] = []
+        if hasattr(gow2018_data, "get_all_types"):
+            try:
+                types = list(gow2018_data.get_all_types())
+            except Exception:
+                types = []
+        if not types:
             tset = {row.get("type") for row in self._all_items if row.get("type")}
             types = sorted(tset)
 
@@ -215,11 +257,20 @@ class InventoryTab(QWidget):
     def _on_filter_changed(self) -> None:
         self._apply_filters()
 
+    def _on_hide_unknowns_toggled(self, checked: bool) -> None:
+        self._hide_unknowns = bool(checked)
+        # Refilter DB side
+        self._apply_filters()
+        # Rebuild Items-in-save side
+        self._populate_save_table()
+
     def _apply_filters(self) -> None:
         type_filter = self.type_combo.currentText()
         search = self.search_edit.text().strip().lower()
 
         def match(row: Dict) -> bool:
+            if self._hide_unknowns and self._is_unknown_row(row):
+                return False
             if type_filter and type_filter != "All":
                 if (row.get("type") or "") != type_filter:
                     return False
@@ -260,8 +311,8 @@ class InventoryTab(QWidget):
     def refresh_from_save(self) -> None:
         self._reload_items_in_save()
         self._populate_save_table()
+        self.setDisabled(self._file_ctx.save is None)
 
-    # Backwards-compat alias
     def refresh_from_context(self) -> None:
         self.refresh_from_save()
 
@@ -302,7 +353,6 @@ class InventoryTab(QWidget):
 
         self._item_write_info = {}
         self._free_entry_positions = []
-
         aggregated: Dict[str, Dict] = {}
 
         for i in range(max_entries):
@@ -319,15 +369,22 @@ class InventoryTab(QWidget):
                 continue
 
             meta = items_by_id.get(id_hex)
-            if not meta or qty <= 0:
+            # If unknown ID, we'll still keep it but mark name/type so our
+            # _is_unknown_row() can hide it when requested.
+            if meta:
+                name = meta.get("name") or ""
+                type_ = meta.get("type") or ""
+            else:
+                name = "(Unknown)"
+                type_ = "Unknown"
+
+            if qty <= 0:
                 continue
 
             lst = self._item_write_info.setdefault(id_hex, [])
             lst.append(pos)
 
             existing = aggregated.get(id_hex)
-            name = meta.get("name") or ""
-            type_ = meta.get("type") or ""
             if existing is None:
                 aggregated[id_hex] = {
                     "id": id_hex,
@@ -344,33 +401,47 @@ class InventoryTab(QWidget):
         )
 
     def _populate_save_table(self) -> None:
+        """
+        Build the right-side table. We may hide unknown rows, so we also
+        store the underlying index of each visible row in the ID cell's
+        UserRole for mapping edits/removals back into _items_in_save.
+        """
         table = self.table_save
-        rows = self._items_in_save
-
         self._updating_save_table = True
-        table.setRowCount(len(rows))
 
-        for r, row in enumerate(rows):
-            # Name / Type / ID: non-editable
+        # Build list of (index_in_items_in_save, row_dict) for visible rows
+        visible_rows = []
+        for idx, row in enumerate(self._items_in_save):
+            if self._hide_unknowns and self._is_unknown_row(row):
+                continue
+            visible_rows.append((idx, row))
+
+        table.setRowCount(len(visible_rows))
+
+        for r, (src_idx, row) in enumerate(visible_rows):
+            # Name
             name_item = QTableWidgetItem(row["name"])
             name_item.setFlags(
                 Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
             )
             table.setItem(r, 0, name_item)
 
+            # Type
             type_item = QTableWidgetItem(row["type"])
             type_item.setFlags(
                 Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
             )
             table.setItem(r, 1, type_item)
 
+            # ID (store underlying index in UserRole)
             id_item = QTableWidgetItem(row["id"])
             id_item.setFlags(
                 Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
             )
+            id_item.setData(Qt.ItemDataRole.UserRole, src_idx)
             table.setItem(r, 2, id_item)
 
-            # Qty: editable
+            # Qty (also store underlying index in UserRole)
             qty_item = QTableWidgetItem(str(row["qty"]))
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty_item.setFlags(
@@ -378,6 +449,7 @@ class InventoryTab(QWidget):
                 | Qt.ItemFlag.ItemIsEnabled
                 | Qt.ItemFlag.ItemIsEditable
             )
+            qty_item.setData(Qt.ItemDataRole.UserRole, src_idx)
             table.setItem(r, 3, qty_item)
 
         self._updating_save_table = False
@@ -389,15 +461,14 @@ class InventoryTab(QWidget):
     def _on_save_table_item_changed(self, item: QTableWidgetItem) -> None:
         if self._updating_save_table:
             return
-
-        row = item.row()
-        col = item.column()
-
-        # Only care about Qty column
-        if col != 3:
+        if item.column() != 3:
             return
 
-        if row < 0 or row >= len(self._items_in_save):
+        src_idx = item.data(Qt.ItemDataRole.UserRole)
+        if src_idx is None:
+            return
+        src_idx = int(src_idx)
+        if src_idx < 0 or src_idx >= len(self._items_in_save):
             return
 
         text = item.text().strip()
@@ -407,19 +478,17 @@ class InventoryTab(QWidget):
             try:
                 new_qty = int(text)
             except ValueError:
-                # revert to previous value
+                # revert to previous
                 self._updating_save_table = True
-                item.setText(str(self._items_in_save[row]["qty"]))
+                item.setText(str(self._items_in_save[src_idx]["qty"]))
                 self._updating_save_table = False
                 return
 
         if new_qty < 0:
             new_qty = 0
 
-        # Update in-memory model
-        self._items_in_save[row]["qty"] = new_qty
+        self._items_in_save[src_idx]["qty"] = new_qty
 
-        # normalize display text (no leading zeros)
         self._updating_save_table = True
         item.setText(str(new_qty))
         self._updating_save_table = False
@@ -429,6 +498,10 @@ class InventoryTab(QWidget):
     # ------------------------------------------------------------------
 
     def apply_to_save(self) -> None:
+        """
+        Push current _items_in_save back into save.raw for the active slot.
+        Unknown items are still written back even when hidden.
+        """
         save = getattr(self._file_ctx, "save", None)
         if save is None:
             print("[InventoryTab] apply_to_save: no save loaded in FileContext.")
@@ -463,6 +536,7 @@ class InventoryTab(QWidget):
             positions = self._item_write_info.get(item_id, [])
 
             if qty <= 0:
+                # clear any existing entries for this id
                 for pos_entry in positions:
                     buf[pos_entry : pos_entry + 8] = b"\x00" * 8
                     buf[pos_entry + 8 : pos_entry + 12] = (0).to_bytes(4, "little")
@@ -496,11 +570,6 @@ class InventoryTab(QWidget):
 
         save.raw = bytes(buf)
 
-        if hasattr(save, "mark_dirty"):
-            try:
-                save.mark_dirty()
-            except Exception:
-                pass
         if hasattr(self._file_ctx, "mark_dirty"):
             try:
                 self._file_ctx.mark_dirty()
@@ -542,14 +611,25 @@ class InventoryTab(QWidget):
 
     def _on_remove_clicked(self) -> None:
         row = self.table_save.currentRow()
-        if row < 0 or row >= len(self._items_in_save):
+        if row < 0:
             return
 
-        entry = self._items_in_save[row]
+        id_item = self.table_save.item(row, 2)
+        if id_item is None:
+            return
+
+        src_idx = id_item.data(Qt.ItemDataRole.UserRole)
+        if src_idx is None:
+            return
+        src_idx = int(src_idx)
+        if src_idx < 0 or src_idx >= len(self._items_in_save):
+            return
+
+        entry = self._items_in_save[src_idx]
         if entry["qty"] > 1:
             entry["qty"] -= 1
         else:
-            del self._items_in_save[row]
+            del self._items_in_save[src_idx]
 
         self._populate_save_table()
 
