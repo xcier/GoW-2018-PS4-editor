@@ -24,6 +24,10 @@ from app.core.file_context import FileContext
 from app.core import gow2018_data
 
 
+# Max value that fits in a 4-byte unsigned int (what the save uses for qty)
+MAX_INVENTORY_QTY = 0xFFFFFFFF
+
+
 class InventoryTab(QWidget):
     """
     Inventory editor for GoW 2018.
@@ -47,7 +51,7 @@ class InventoryTab(QWidget):
     INVENTORY_ENTRY_SIZE = 16
     INVENTORY_MAX_ENTRIES = 256  # safe upper bound
 
-    def __init__(self, file_ctx: FileContext, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, file_ctx: FileContext, parent: Optional[Widget] = None) -> None:
         super().__init__(parent)
 
         self._file_ctx = file_ctx
@@ -121,7 +125,9 @@ class InventoryTab(QWidget):
         self.table_available.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
-        self.table_available.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_available.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
         self.table_available.verticalHeader().setVisible(False)
         left_col.addWidget(self.table_available, 1)
 
@@ -484,8 +490,11 @@ class InventoryTab(QWidget):
                 self._updating_save_table = False
                 return
 
+        # Clamp to valid 4-byte unsigned range
         if new_qty < 0:
             new_qty = 0
+        elif new_qty > MAX_INVENTORY_QTY:
+            new_qty = MAX_INVENTORY_QTY
 
         self._items_in_save[src_idx]["qty"] = new_qty
 
@@ -532,6 +541,13 @@ class InventoryTab(QWidget):
         for row in self._items_in_save:
             item_id = row["id"]
             qty = int(row["qty"])
+
+            # Safety: clamp again before writing to bytes
+            if qty < 0:
+                qty = 0
+            elif qty > MAX_INVENTORY_QTY:
+                qty = MAX_INVENTORY_QTY
+            row["qty"] = qty
 
             positions = self._item_write_info.get(item_id, [])
 
