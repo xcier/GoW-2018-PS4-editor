@@ -1,38 +1,26 @@
 from __future__ import annotations
-from pathlib import Path
-import struct
+
+"""Search for integer/float values near a GoW 2018 slot base.
+
+Example:
+    python tools/find_value_near_slot.py path/to/memory.dat --slot 7 --u32 178808
+    python tools/find_value_near_slot.py path/to/memory.dat --slot 7 --f32 99.0 --radius 0x8000
+"""
+
+import argparse
 import json
+import struct
+from pathlib import Path
 
-# ---------------------------------------------------------------------
-# CONFIG – EDIT THESE BEFORE RUNNING
-# ---------------------------------------------------------------------
-
-# Decrypted save file
-SAVE_PATH = Path(r"E:\repos\GoW 2018\memory.dat")
-
-# Slot layout JSON (from your SW sheet -> gow2018_slots.json)
-SLOTS_JSON = Path(r"E:\repos\GoW 2018\app\resources\database\gow2018_slots.json")
-
-# Which slot you want to scan (1–11 in your sheet)
-SLOT_INDEX = 1
-
-# Value you are hunting for (int or float depending on what you’re looking for)
-#   Example 1: if your Hacksilver is 123456, set TARGET_VALUE_INT = 123456
-#   Example 2: if a stat is 99.0f, leave TARGET_VALUE_INT=None and
-#              set TARGET_VALUE_FLOAT = 99.0
-TARGET_VALUE_INT: int | None = None
-TARGET_VALUE_FLOAT: float | None = None  # e.g. 99.0
-
-# How far around the slot base to scan
-SEARCH_RADIUS = 0x8000   # 32 KB either side
+DEFAULT_SLOTS_JSON = Path(__file__).resolve().parents[1] / "app" / "resources" / "database" / "gow2018_slots.json"
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
+def parse_int(value: str) -> int:
+    return int(value, 0)
 
-def load_slot_base(slot_index: int) -> int:
-    with SLOTS_JSON.open("r", encoding="utf-8") as f:
+
+def load_slot_base(slots_json: Path, slot_index: int) -> int:
+    with slots_json.open("r", encoding="utf-8") as f:
         slots = json.load(f)["slots"]
     for slot in slots:
         if slot.get("slot") == slot_index:
@@ -43,46 +31,54 @@ def load_slot_base(slot_index: int) -> int:
             if len(parts) < 2:
                 raise SystemExit(f"Bad alt_pointer for slot {slot_index}: {alt}")
             return int(parts[1], 16)
-    raise SystemExit(f"Slot {slot_index} not found in gow2018_slots.json")
+    raise SystemExit(f"Slot {slot_index} not found in {slots_json}")
 
 
-def scan_for_pattern(buf: bytes, base: int, pattern: bytes) -> None:
-    window_start = max(0, base - SEARCH_RADIUS)
-    window_end = min(len(buf), base + SEARCH_RADIUS)
+def scan_for_pattern(buf: bytes, base: int, pattern: bytes, radius: int) -> list[int]:
+    window_start = max(0, base - radius)
+    window_end = min(len(buf), base + radius)
     window = buf[window_start:window_end]
-
+    hits: list[int] = []
     idx = window.find(pattern)
-    hits = 0
     while idx != -1:
-        file_off = window_start + idx
-        rel = file_off - base
-        print(f"  hit at file 0x{file_off:08X} (rel 0x{rel:08X})")
-        hits += 1
+        hits.append(window_start + idx)
         idx = window.find(pattern, idx + 1)
-
-    if hits == 0:
-        print("  no matches in this window")
+    return hits
 
 
 def main() -> None:
-    if TARGET_VALUE_INT is None and TARGET_VALUE_FLOAT is None:
-        raise SystemExit("Set TARGET_VALUE_INT or TARGET_VALUE_FLOAT at the top of the file.")
+    parser = argparse.ArgumentParser(description="Search for u32/f32 values near a GoW 2018 slot base.")
+    parser.add_argument("save", type=Path, help="Path to decrypted memory.dat")
+    parser.add_argument("--slot", type=int, required=True, help="Physical slot number to scan")
+    parser.add_argument("--u32", type=parse_int, help="Unsigned 32-bit integer to search for, decimal or 0x hex")
+    parser.add_argument("--f32", type=float, help="32-bit float value to search for")
+    parser.add_argument("--radius", type=parse_int, default=0x8000, help="Bytes to scan before/after slot base")
+    parser.add_argument("--slots-json", type=Path, default=DEFAULT_SLOTS_JSON, help="Path to gow2018_slots.json")
+    args = parser.parse_args()
 
-    data = SAVE_PATH.read_bytes()
-    base = load_slot_base(SLOT_INDEX)
-    print(f"Slot {SLOT_INDEX} base offset: 0x{base:08X}")
+    if args.u32 is None and args.f32 is None:
+        raise SystemExit("Provide --u32 and/or --f32.")
 
-    # u32 search
-    if TARGET_VALUE_INT is not None:
-        pat = struct.pack("<I", TARGET_VALUE_INT & 0xFFFFFFFF)
-        print(f"\nSearching for u32 {TARGET_VALUE_INT} (pattern {pat.hex()})...")
-        scan_for_pattern(data, base, pat)
+    data = args.save.read_bytes()
+    base = load_slot_base(args.slots_json, args.slot)
+    print(f"Slot {args.slot} base offset: 0x{base:08X}")
 
-    # float search
-    if TARGET_VALUE_FLOAT is not None:
-        pat = struct.pack("<f", float(TARGET_VALUE_FLOAT))
-        print(f"\nSearching for f32 {TARGET_VALUE_FLOAT} (pattern {pat.hex()})...")
-        scan_for_pattern(data, base, pat)
+    searches: list[tuple[str, bytes]] = []
+    if args.u32 is not None:
+        searches.append((f"u32 {args.u32}", struct.pack("<I", args.u32 & 0xFFFFFFFF)))
+    if args.f32 is not None:
+        searches.append((f"f32 {args.f32}", struct.pack("<f", float(args.f32))))
+
+    for label, pattern in searches:
+        print(f"\nSearching for {label} ({pattern.hex()})...")
+        hits = scan_for_pattern(data, base, pattern, args.radius)
+        if not hits:
+            print("  no matches")
+            continue
+        for off in hits:
+            rel = off - base
+            sign = "-" if rel < 0 else "+"
+            print(f"  hit at file 0x{off:08X} (slot base {sign}0x{abs(rel):X})")
 
 
 if __name__ == "__main__":

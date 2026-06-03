@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+*.spec.bak
+*.egg-info/
+
+# Release/archive artifacts
+*.zip
+*.7z
+*.rar
+*.patch
+
+# Local saves/backups - never commit decrypted saves
+*.bak
+*.tmp
+*.dat
+*.gow2018slot
+*.slotpkg
+*.slot_backups/
+**/*.slot_backups/
+memory.dat.slot_backups/
+
+# Logs/local runtime files
+*.log
+*.ini.local
+.env
+.env.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

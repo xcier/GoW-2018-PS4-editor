@@ -1,165 +1,144 @@
-GoW 2018 Save Editor
+# GoW Save Lab
 
-Created by ProtoBuffers
-A modern PyQt6-based save editor for God of War (2018) (PS4).
-Built for research, modding, and personal experimentation.
+Created by **ProtoBuffers**. A PyQt6 desktop save editor for decrypted **God of War (2018) PS4 `memory.dat`** files.
 
-⚠️ Important Warning
+This project edits decrypted save data only. It does **not** decrypt, re-encrypt, resign, or modify PS4 account/security data.
 
-This tool modifies save data directly.
-Always back up your save files before using the editor.
+Current app version: **0.9.9**.
 
-⭐ Features
-🔹 Inventory Editor
+## Features
 
-View all items found in your save.
+- Auto-detects and opens the newest active save slot.
+- Dashboard with active slot, difficulty, XP, Hacksilver, and validation state.
+- Slot Manager for viewing all 20 physical save slots.
+- Slot Tools for backing up, restoring, importing, and transferring individual `.gow2018slot` packages or whole slot blocks.
+- Slot copy workflows for moving a slot within the loaded save, into another decrypted `memory.dat`, or from another decrypted save into the loaded save.
+- Inventory editor with type tabs, searchable current-slot view, add/remove/edit quantity, max selected, max all, and Advanced Unlock for manual system-row edits.
+- Experimental inventory append mode for test saves where no free item records are available.
+- XP and Hacksilver sync between Dashboard and Inventory by locating the actual inventory rows instead of assuming fixed row positions.
+- Guarded Hex Editor with read-only default, search/jump tools, known offsets, and explicit staged byte patching.
+- Save Preview before writes.
+- Atomic save writes with timestamped rollback `.bak` backups.
+- Multiple UI themes with persistent theme/recent-save preferences.
 
-Edit quantity directly (double-click Qty cell).
+## Safety model
 
-Add/remove/clear items using a full database of known item IDs.
+The editor is designed to avoid silent save corruption:
 
-Automatically maps and writes changes back to the correct memory offsets.
+- Save writes are staged in memory first.
+- Save/Save As show a change review before writing.
+- Overwrites use atomic replacement and create rollback backups.
+- Inventory writes require a valid XP table anchor.
+- No-edit roundtrips are covered by regression tests and can be checked against your own decrypted saves with the validator.
+- Locked/system inventory rows are protected by default. Advanced Unlock allows manual quantity edits, but still blocks removal.
 
-Uses correct slot base offsets + 16-byte inventory entries.
+Known verified inventory/resource table offset:
 
-🔹 Stats Editor
+```text
+slot_base + 0x1041D
+```
 
-Edit Kratos stats pulled directly from the save (if implemented in your build).
+Inventory/resource records are treated as 16-byte entries:
 
-🔹 Dark Mode / Light Mode
+```text
+0x00..0x07  item/resource ID bytes
+0x08..0x0B  quantity, little-endian uint32
+0x0C..0x0F  metadata/flags, preserved for existing records
+```
 
-Full UI theme switcher.
+## Run from source
 
-🔹 About Tab
+```bat
+py -3 -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python -m app
+```
 
-Includes credits and links to the original Google Sheets data source.
+You can also run:
 
-🔹 Settings Tab
-
-Central configuration for theme and UI behavior.
-
-📁 Project Structure
-GoW 2018/
-│ main.py
-│ gow2018_editor.spec
-│ README.md
-│
-├── app/
-│   ├── core/
-│   │   ├── file_context.py
-│   │   ├── save_file.py
-│   │   └── gow2018_data.py
-│   │
-│   ├── resources/
-│   │   └── database/
-│   │       ├── items.json
-│   │       ├── categories.json
-│   │       └── (other DB files)
-│   │
-│   └── ui/
-│       ├── main_window.py
-│       └── tabs/
-│           ├── inventory_tab.py
-│           ├── stats_tab.py
-│           ├── settings_tab.py
-│           └── about_tab.py
-
-📦 Installation
-Requirements
-
-Python 3.10 – 3.13
-
-PyQt6
-
-PyInstaller (optional, for building EXE)
-
-Install dependencies:
-
-pip install PyQt6
-
-🚀 Running the Editor
-
-From the project root:
-
+```bat
 python main.py
+```
 
-🛠 Building an EXE (Windows)
+## Build single-file Windows EXE
 
-A PyInstaller spec file is included:
+The included PyInstaller spec is configured for a **single-file windowed executable**. It has no `COLLECT` step; bundled code, Qt files, and database resources are attached to `dist\GoWSaveLab.exe`.
 
-gow2018_editor.spec
+```bat
+py -3 -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+python -m compileall -q .
+python -m pytest -q
+pyinstaller --clean --noconfirm gow_save_lab.spec
+```
 
-Bundles all resources under app/resources/database
+Output:
 
-Produces a clean EXE with no console window
+```text
+dist\GoWSaveLab.exe
+```
 
-Build it:
+Or use the Windows build helper:
 
-pyinstaller gow2018_editor.spec
+```bat
+build_windows.bat
+```
 
+## Test
 
-Output will appear in:
+```bat
+python -m compileall -q .
+python -m pytest -q
+```
 
-dist/GoW2018Editor.exe
+Current expected result for this source package:
 
-📚 Data Sources
+```text
+89 passed
+```
 
-Item data and inventory offsets originate from community reverse-engineering work and this spreadsheet:
+## Validate a decrypted save
 
-God of War 2018 Item / Inventory Spreadsheet
-https://docs.google.com/spreadsheets/d/1lFtR-dUWNXwvk6YgqFYlqoyNGR0Zf2uEhlNcajmiuI8/edit#gid=1625401531
+```bat
+python tools\validate_memory_dat.py path\to\memory.dat
+```
 
-🧩 Save File Notes
+The validator checks slot summaries, inventory anchors, row counts, free entries, and no-edit roundtrip behavior.
 
-Inventory entries are 16 bytes each:
+## Rebuild bundled database JSON
 
-[0..7] → Item ID
+The bundled JSON files are already included. To rebuild them from the raw CSV files:
 
-[8..11] → Quantity (LE u32)
+```bat
+python tools\build_gow2018_resources.py
+```
 
-[12..15] → Flags/unknown
+Source CSVs live in `data/raw/`. Runtime JSON files live in `app/resources/database/`.
 
-Slot base offsets are resolved dynamically.
+## Project layout
 
-The editor updates:
+```text
+app/core/                 Save parsing, inventory model, slot transfer, backups
+app/ui/                   PyQt6 shell, themes, and tabs
+app/resources/database/   Runtime item/slot/code JSON resources
+data/raw/                 Raw community CSV resources used to rebuild JSON
+docs/                     Safety, validation, and feature notes
+tests/                    Regression tests
+tools/                    Validation/audit/resource-build helpers
+```
 
-Used slots
+## Data sources
 
-Free slots
+The bundled item, slot, and code resources were generated from the community God of War IDs spreadsheet tabs used during development:
 
-Removed item cleanup
+- Item IDs
+- Save Slot Starting Points
+- Codes
 
-Editing quantities in the UI only changes internal state.
-Actual save modification happens when you Save / Save As:
+## Usage notes
 
-self.inventory_tab.apply_to_save()
-self.file_ctx.save_to_disk()
-
-
-(Already integrated in your MainWindow.)
-
-🎨 Credits
-
-ProtoBuffers — Development, UI, save research
-
-GoW reverse-engineering community
-
-Google Sheets contributors
-
-PyQt6 project
-
-📬 Support / Suggestions
-
-If you want, I can add:
-
-Binary icon embedding
-
-Portable ZIP build
-
-Logging window
-
-Auto-detect save slots
-
-Weapon / armor sub-editors
-
-Just ask — happy to extend this project anytime.
+Always keep your original PS4 save backup. Work on decrypted `memory.dat`, then re-encrypt/resign using your normal save workflow outside this editor.

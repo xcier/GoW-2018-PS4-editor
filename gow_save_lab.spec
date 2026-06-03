@@ -1,6 +1,8 @@
-# gow2018_editor.spec
-# Build with:
-#   pyinstaller gow2018_editor.spec
+# gow_save_lab.spec
+# Build with: pyinstaller --clean --noconfirm gow_save_lab.spec
+# This spec intentionally builds a single-file windowed executable:
+#   dist/GoWSaveLab.exe
+# Do not add a COLLECT() block unless switching back to onedir output.
 
 # -*- mode: python ; coding: utf-8 -*-
 
@@ -11,7 +13,6 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        # Bundle the entire database folder (relative to project root)
         ('app/resources/database', 'app/resources/database'),
     ],
     hiddenimports=[],
@@ -22,11 +23,7 @@ a = Analysis(
     noarchive=False,
 )
 
-pyz = PYZ(
-    a.pure,
-    a.zipped_data,
-    cipher=block_cipher,
-)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -35,12 +32,12 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='GoW2018Editor',
+    name='GoWSaveLab',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,        # no console window
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
 )

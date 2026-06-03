@@ -6,13 +6,19 @@ from pathlib import Path
 from typing import Dict, Any
 
 import json
+import sys
 import math
 import re
 
 import pandas as pd
 
 
+
 ROOT = Path(__file__).resolve().parent.parent  # project root
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.core.gow2018_data import normalize_items_database
 RAW_DIR = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "app" / "resources" / "database"
 
@@ -56,56 +62,60 @@ def build_items(df: pd.DataFrame) -> Dict[str, Any]:
             continue
         by_type.setdefault(tp, []).append(iid)
 
-    return {
+    return normalize_items_database({
         "items": items,
         "by_id": by_id,
         "by_name": by_name,
         "by_type": by_type,
-    }
+    })
+
+
+def _cell_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if math.isnan(value):  # type: ignore[arg-type]
+            return ""
+    except Exception:
+        pass
+    return str(value).strip()
 
 
 def build_slots(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Build physical save-data slots from every 95000000 actual-data pointer.
+
+    The spreadsheet has a quick-mode column and an "Alternative Slot format
+    Actual Data" column. Older builds attached only some 95000000 rows to the
+    visible slot labels, skipping every other actual-data base and causing the
+    editor to write to the wrong save block. For direct memory.dat editing, the
+    correct source of truth is the ordered list of 95000000 bases.
+    """
     col0 = "Set Starting Points for Game Slot GOW"
     col2 = 'Alternative Slot format "Actual Data" not always in correct order '
+
     slots = []
+    physical_index = 1
 
     for idx, row in df.iterrows():
-        val = str(row[col0]) if not pd.isna(row[col0]) else ""
-        if val.startswith("Slot "):
-            try:
-                slot_num = int(val.split()[1])
-            except Exception:
-                continue
+        alt = _cell_text(row[col2]) if col2 in df.columns else ""
+        if not alt.startswith("95000000"):
+            continue
 
+        quick = _cell_text(row[col0]) if col0 in df.columns else ""
+        if not quick.startswith("90000000"):
             quick = None
-            alt = None
 
-            for j in range(idx + 1, min(idx + 3, len(df))):
-                nxt = df.iloc[j][col0]
-                if isinstance(nxt, str) and nxt.startswith("90000000"):
-                    quick = nxt.strip()
-                    break
+        slots.append(
+            {
+                "slot": physical_index,
+                "quick_pointer": quick,
+                "alt_pointer": alt,
+                "source_row": int(idx) + 2,  # +2 accounts for CSV header + 1-based sheet rows
+            }
+        )
+        physical_index += 1
 
-            candidate = row[col2]
-            if isinstance(candidate, str) and candidate.startswith("95000000"):
-                alt = candidate.strip()
-            else:
-                for j in (idx - 1, idx + 1):
-                    if 0 <= j < len(df):
-                        cand = df.iloc[j][col2]
-                        if isinstance(cand, str) and cand.startswith("95000000"):
-                            alt = cand.strip()
-                            break
-
-            slots.append(
-                {
-                    "slot": slot_num,
-                    "quick_pointer": quick,
-                    "alt_pointer": alt,
-                }
-            )
-
-    slots.sort(key=lambda s: s["slot"])
     return {"slots": slots}
 
 

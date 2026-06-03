@@ -1,0 +1,17 @@
+[project]
+name = "gow-save-lab"
+version = "0.9.9"
+description = "PyQt6 editor for decrypted God of War (2018) PS4 memory.dat saves."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyQt6>=6.6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.pyinstaller]
+entry-point = "main.py"

@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Iterable, Optional, Union
 import struct
 import datetime
 
 from app.core import gow2018_data
 from app.core.gow2018_layout import build_layout_for_slot, LayoutSpec, SlotField
+from app.core.atomic_write import atomic_write_bytes
+from app.core.inventory_model import HACKSILVER_ITEM_ID, XP_ITEM_ID, read_item_quantity, write_item_quantity
 
 Number = Union[int, float]
 
@@ -31,10 +33,9 @@ Number = Union[int, float]
 # either read or overwrite it.
 ARMOR_STAT_MARKERS: Dict[str, tuple[str, str]] = gow2018_data.ARMOR_STAT_MARKERS
 
-# Relative offset from a slot's base pointer to the inventory table.
+# Inventory table layout shared with the UI.
 INVENTORY_TABLE_REL_OFFSET: int = gow2018_data.INVENTORY_TABLE_REL_OFFSET
-
-# How many entries we expect in the inventory table for each slot.
+INVENTORY_ENTRY_SIZE: int = gow2018_data.INVENTORY_ENTRY_SIZE
 INVENTORY_ENTRY_COUNT: int = gow2018_data.INVENTORY_ENTRY_COUNT
 
 
@@ -54,7 +55,7 @@ class SaveFile:
     gow2018_slots.json to resolve per-slot base pointers.
     """
 
-    raw: bytes = b""
+    raw: Union[bytes, bytearray] = b""
     path: Optional[Path] = None
 
     # slot/layout info
@@ -76,11 +77,14 @@ class SaveFile:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_path(cls, path: Path, active_slot: int = 1) -> "SaveFile":
+    def from_path(cls, path: Path, active_slot: Optional[int] = None) -> "SaveFile":
         raw = path.read_bytes()
         save = cls(raw=raw, path=path)
 
-        save.active_slot = active_slot
+        if active_slot is None:
+            active_slot = save.find_most_recent_active_slot()
+
+        save.active_slot = int(active_slot)
         save._init_layout()
         save._load_core_stats_from_binary()
         save._load_inventory_from_binary()
@@ -138,6 +142,23 @@ class SaveFile:
 
         return struct.unpack_from(fmt, buf, start)[0]
 
+    @staticmethod
+    def _coerce_primitive_value(field: SlotField, value: Number) -> Number:
+        """Clamp/cast values before struct.pack_into to avoid partial writes."""
+        if field.type == "f32":
+            return float(value)
+
+        ivalue = int(value)
+        if field.type == "u8":
+            return max(0, min(ivalue, 0xFF))
+        if field.type == "u16":
+            return max(0, min(ivalue, 0xFFFF))
+        if field.type == "u32":
+            return max(0, min(ivalue, 0xFFFFFFFF))
+        if field.type == "s32":
+            return max(-0x80000000, min(ivalue, 0x7FFFFFFF))
+        return ivalue
+
     def _write_primitive(self, field: SlotField, value: Number) -> None:
         """
         Write a primitive value (int/float) into the raw buffer using the
@@ -164,7 +185,34 @@ class SaveFile:
         if start + size > len(buf):
             raise ValueError(f"Field {field.name} out of range")
 
-        struct.pack_into(fmt, buf, start, value)
+        struct.pack_into(fmt, buf, start, self._coerce_primitive_value(field, value))
+
+    # ------------------------------------------------------------------
+    # Dynamic inventory-backed core resources
+    # ------------------------------------------------------------------
+
+    def _read_inventory_quantity_by_id(self, item_id: str) -> Optional[int]:
+        """Read a resource quantity by item ID in the active slot table.
+
+        Real saves do not always keep core resources on the same row. Hacksilver
+        in particular can be row 3 in one save and row 4 in another, so the
+        dashboard must resolve it by item ID instead of a fixed relative offset.
+        """
+        try:
+            return read_item_quantity(self.raw, int(self.active_slot), item_id)
+        except Exception:
+            return None
+
+    def _write_inventory_quantity_by_id(self, item_id: str, value: int) -> bool:
+        """Write a resource quantity by item ID if that row exists."""
+        try:
+            result = write_item_quantity(self.raw, int(self.active_slot), item_id, int(value))
+        except Exception:
+            return False
+        if result is None:
+            return False
+        self.raw = result.raw
+        return True
 
     # ------------------------------------------------------------------
     # Core stats
@@ -192,31 +240,53 @@ class SaveFile:
         except Exception:
             self.difficulty = 0
 
-        try:
-            self.kratos_xp = int(self._read_primitive(xp_field))
-        except Exception:
-            self.kratos_xp = 0
+        # XP is the first inventory/resource row and doubles as the validated
+        # table anchor. Resolve it by item ID first so Dashboard and Inventory
+        # always describe the same quantity bytes. Fall back to the legacy
+        # primitive field for synthetic/minimal buffers that do not include a
+        # validated inventory table.
+        xp_value = self._read_inventory_quantity_by_id(XP_ITEM_ID)
+        if xp_value is not None:
+            self.kratos_xp = int(xp_value)
+        else:
+            try:
+                self.kratos_xp = int(self._read_primitive(xp_field))
+            except Exception:
+                self.kratos_xp = 0
 
-        try:
-            self.hacksilver = int(self._read_primitive(hs_field))
-        except Exception:
-            self.hacksilver = 0
+        # Hacksilver is stored as an inventory/resource row, and real saves
+        # can place that row at different indices. Prefer the dynamic item-ID
+        # lookup and fall back to the legacy fixed field only if the table is
+        # unavailable.
+        hs_value = self._read_inventory_quantity_by_id(HACKSILVER_ITEM_ID)
+        if hs_value is not None:
+            self.hacksilver = int(hs_value)
+        else:
+            try:
+                self.hacksilver = int(self._read_primitive(hs_field))
+            except Exception:
+                self.hacksilver = 0
 
-    def _store_core_stats_to_binary(self) -> None:
+    def _store_core_stats_to_binary(self, fields: Optional[Iterable[str]] = None) -> None:
         """
-        Write the current in-memory core stats for the active slot back
-        into the raw buffer.
+        Write selected in-memory core stats for the active slot back into raw.
+
+        ``fields`` is intentionally supported so editing Hacksilver or XP does
+        not also normalize an untouched difficulty byte from a save variant the
+        editor does not fully understand yet.
         """
         self._ensure_layout()
         if self.layout is None:
             return
 
+        selected = set(fields) if fields is not None else {"difficulty", "kratos_xp", "hacksilver"}
+
         diff_field = self._get_field_def("difficulty")
         xp_field = self._get_field_def("kratos_xp")
         hs_field = self._get_field_def("hacksilver")
 
-        # difficulty is always clamped into [0,3]
-        if diff_field is not None:
+        # difficulty is always clamped into [0,3] when explicitly edited.
+        if "difficulty" in selected and diff_field is not None:
             v = int(self.difficulty)
             if v < 0:
                 v = 0
@@ -224,21 +294,88 @@ class SaveFile:
                 v = 3
             self._write_primitive(diff_field, v)
 
-        if xp_field is not None:
-            self._write_primitive(xp_field, int(self.kratos_xp))
+        if "kratos_xp" in selected:
+            xp_written = self._write_inventory_quantity_by_id(XP_ITEM_ID, int(self.kratos_xp))
+            if not xp_written and xp_field is not None:
+                self._write_primitive(xp_field, int(self.kratos_xp))
 
-        if hs_field is not None:
-            self._write_primitive(hs_field, int(self.hacksilver))
+        # Prefer the resource-table row so Dashboard Hacksilver stays in sync
+        # even when the row moves inside the table. Fall back to the legacy
+        # fixed field for synthetic/minimal buffers with no validated table.
+        if "hacksilver" in selected:
+            hs_written = self._write_inventory_quantity_by_id(HACKSILVER_ITEM_ID, int(self.hacksilver))
+            if not hs_written and hs_field is not None:
+                self._write_primitive(hs_field, int(self.hacksilver))
 
-    def commit_core_stats(self) -> None:
+    def commit_core_stats(self, fields: Optional[Iterable[str]] = None) -> None:
         """
         Called by the Stats tab whenever the user edits difficulty/XP/HS.
         """
-        self._store_core_stats_to_binary()
+        self._store_core_stats_to_binary(fields=fields)
 
     # ------------------------------------------------------------------
     # Slot selection + summary
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _coerce_summary_int(summary: Dict[str, Union[int, str]], key: str) -> int:
+        try:
+            return int(summary.get(key, 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _slot_summary_looks_active(self, slot_index: int, summary: Optional[Dict[str, Union[int, str]]]) -> bool:
+        """Return True when a slot summary appears to describe a real used slot.
+
+        Empty save blocks in GoW 2018 commonly read as timestamp 0, empty
+        location, and zeroed stats. We require a plausible timestamp plus at
+        least one real-data signal so auto-selection does not jump to blank or
+        malformed slot blocks.
+        """
+        if not summary:
+            return False
+
+        ts_raw = self._coerce_summary_int(summary, "last_played_raw")
+        # 2000-01-01 through 2100-01-01 keeps obviously empty/corrupt values
+        # from winning auto-selection while accepting normal PS4 save dates.
+        if not (946684800 <= ts_raw <= 4102444800):
+            return False
+
+        location = str(summary.get("location", "")).strip()
+        xp = self._coerce_summary_int(summary, "xp")
+        hacksilver = self._coerce_summary_int(summary, "hacksilver")
+        has_inventory_anchor = gow2018_data.inventory_anchor_is_valid(self.raw, slot_index)
+
+        return bool(location or xp or hacksilver or has_inventory_anchor)
+
+    def find_most_recent_active_slot(self) -> int:
+        """Return the newest used save slot based on each slot timestamp.
+
+        The community slot table stores every physical slot base, but many
+        saves contain blank unused slot blocks. This helper ignores those and
+        chooses the valid used slot with the highest last-played timestamp.
+        """
+        slots = gow2018_data.get_save_slots()
+        valid_slots = sorted(
+            int(s["slot"])
+            for s in slots
+            if isinstance(s.get("slot"), int) and int(s["slot"]) > 0
+        )
+        if not valid_slots:
+            return 1
+
+        best_slot = valid_slots[0]
+        best_timestamp = -1
+        for slot_index in valid_slots:
+            summary = self.summarize_slot(slot_index)
+            if not self._slot_summary_looks_active(slot_index, summary):
+                continue
+            timestamp = self._coerce_summary_int(summary, "last_played_raw")
+            if timestamp > best_timestamp or (timestamp == best_timestamp and slot_index > best_slot):
+                best_slot = slot_index
+                best_timestamp = timestamp
+
+        return best_slot
 
     def set_active_slot(self, slot_index: int) -> None:
         """
@@ -257,18 +394,22 @@ class SaveFile:
                 for s in slots
                 if isinstance(s.get("slot"), int) and s["slot"] > 0
             )
-            min_slot = valid[0]
-            max_slot = valid[-1]
+            if not valid:
+                slot_index = 1
+            else:
+                min_slot = valid[0]
+                max_slot = valid[-1]
 
-            if slot_index < min_slot:
-                slot_index = min_slot
-            if slot_index > max_slot:
-                slot_index = max_slot
+                if slot_index < min_slot:
+                    slot_index = min_slot
+                if slot_index > max_slot:
+                    slot_index = max_slot
 
         self.active_slot = slot_index
         # Force layout rebuild on next access and refresh core stats
         self.layout = None
         self._load_core_stats_from_binary()
+        self._load_inventory_from_binary()
 
     def summarize_slot(self, slot_index: int) -> Optional[Dict[str, Union[int, str]]]:
         """
@@ -352,8 +493,14 @@ class SaveFile:
             return int(value)
 
         diff = read_field("difficulty")
-        xp = read_field("kratos_xp")
-        hs = read_field("hacksilver")
+        # XP and Hacksilver are inventory-backed quantities. XP is the table
+        # anchor row; Hacksilver may move between resource rows. Resolve both
+        # by item ID so the header, Slot Manager, Dashboard, and Inventory stay
+        # in sync.
+        xp_dynamic = read_item_quantity(buf, slot_index, XP_ITEM_ID)
+        xp = xp_dynamic if xp_dynamic is not None else read_field("kratos_xp")
+        hs_dynamic = read_item_quantity(buf, slot_index, HACKSILVER_ITEM_ID)
+        hs = hs_dynamic if hs_dynamic is not None else read_field("hacksilver")
 
         if diff is None or not (0 <= diff <= 3):
             diff = 0
@@ -386,19 +533,8 @@ class SaveFile:
     # ------------------------------------------------------------------
 
     def _inventory_region(self) -> tuple[int, int]:
-        """
-        Return (start, end) of the inventory table for the active slot.
-        """
-        base_off = gow2018_data.resolve_slot_base_offset(self.active_slot)
-        if base_off <= 0:
-            return (0, 0)
-
-        start = base_off + INVENTORY_TABLE_REL_OFFSET
-        # Rough upper bound: fixed number of entries * 16 bytes per entry
-        end = start + INVENTORY_ENTRY_COUNT * 16
-        if end > len(self.raw):
-            end = len(self.raw)
-        return (start, end)
+        """Return (start, end) of the active slot inventory table."""
+        return gow2018_data.inventory_region_for_slot(len(self.raw), self.active_slot)
 
     def _load_inventory_from_binary(self) -> None:
         """
@@ -406,7 +542,7 @@ class SaveFile:
         current active slot.
         """
         start, end = self._inventory_region()
-        if end <= start:
+        if end <= start or not gow2018_data.inventory_anchor_is_valid(self.raw, self.active_slot):
             self.inventory_items = {}
             return
 
@@ -418,12 +554,12 @@ class SaveFile:
         while pos + 16 <= end:
             entry = buf[pos : pos + 16]
 
-            item_id = struct.unpack_from("<Q", entry, 0)[0]      # 8 bytes
+            item_id = entry[0:8].hex().upper()                  # 8 bytes
             qty = struct.unpack_from("<I", entry, 8)[0]          # 4 bytes
 
-            # Last 4 bytes are usually zero; we keep them as-is when writing.
+            # Last 4 bytes are usually flags/unknown; do not modify here.
 
-            if item_id != 0 or qty != 0:
+            if item_id != "0000000000000000" or qty != 0:
                 items[row] = {
                     "row": row,
                     "item_id": item_id,
@@ -516,28 +652,47 @@ class SaveFile:
 
         return count
 
+    def boost_all_armor_stats(self, new_value: float) -> Dict[str, int]:
+        """Overwrite every known armor stat marker pair with ``new_value``.
+
+        Returns a per-stat patch count so the UI can report exactly what was
+        changed and avoid marking the save dirty when no markers were found.
+        """
+        result: Dict[str, int] = {}
+        for key in ARMOR_STAT_MARKERS.keys():
+            result[key] = self.boost_armor_stat(key, new_value)
+        return result
+
     # ------------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------------
 
     def to_bytes(self) -> bytes:
-        """Sync logical fields back into raw bytes and return buffer."""
-        # Core stats for the active slot
-        self._store_core_stats_to_binary()
+        """Return the current raw buffer without implicit rewrites.
 
-        # InventoryTab currently writes directly into save.raw; if we ever
-        # add a "global" inventory view, we'd push edits here.
-
-        # Normalize to immutable bytes in case other code used a bytearray.
+        UI tabs commit explicit edits into ``self.raw`` as the user stages them.
+        Returning bytes here must be a no-op because some real saves contain
+        values our current layout only partially understands; a simple Save or
+        Save Preview should never normalize untouched bytes.
+        """
         if isinstance(self.raw, bytearray):
             return bytes(self.raw)
         return self.raw
 
     def write_to_path(self, path: Optional[Path] = None) -> None:
+        """
+        Atomically write the edited save.
+
+        If the target already exists, a timestamped .bak copy is created before
+        replacement. This prevents a failed write from leaving a half-written
+        memory.dat and gives the user an immediate rollback file.
+        """
         if path is None:
             if self.path is None:
                 raise ValueError("No path specified for SaveFile.write_to_path()")
             path = self.path
+
+        path = Path(path)
         data = self.to_bytes()
-        path.write_bytes(data)
+        atomic_write_bytes(path, data, create_backup=True)
         self.path = path
